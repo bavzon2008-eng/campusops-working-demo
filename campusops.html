@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>CampusOps Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--tx:#1d1d1b;--mu:#6b6b66;--bd:#e2e2dc;--ac:#2a5bd7;--ok:#1f8a4c;--wr:#c47a00;--er:#c23b3b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--card:#212120;--tx:#ececE8;--mu:#9a9a94;--bd:#33332f;--ac:#6f95f5;--ok:#4cc27f;--wr:#e0a030;--er:#ee7070}}
+:root[data-theme="dark"]{--bg:#161615;--card:#212120;--tx:#ececE8;--mu:#9a9a94;--bd:#33332f;--ac:#6f95f5;--ok:#4cc27f;--wr:#e0a030;--er:#ee7070}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+main{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0}p.s{color:var(--mu);margin:2px 0 14px}
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.tabs button,.b{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:7px 13px;border-radius:8px;cursor:pointer;font:inherit}
+.tabs button.on,.b.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.b:disabled{opacity:.4;cursor:not-allowed}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:720px){.g{grid-template-columns:1fr}}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.c h3{margin:0 0 8px;font-size:15px}
+textarea{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px;font:inherit;resize:vertical}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--bd);margin:2px 4px 2px 0}
+.ok{color:var(--ok)}.wr{color:var(--wr)}.er{color:var(--er)}.mu{color:var(--mu);font-size:13px}
+.ev{border-left:3px solid var(--ac);padding:6px 10px;margin:8px 0;background:var(--bg);border-radius:0 8px 8px 0}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:5px;border-bottom:1px solid var(--bd)}
+.wrap{overflow-x:auto}.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+</style></head><body><main>
+<h1>CampusOps <span class="mu">prototype</span></h1>
+<p class="s">Natural-language report → workflow. AI-style extraction is simulated here; every rule (stock, schedule, permissions) is deterministic.</p>
+<div class="tabs"><button class="on" data-t="demo">Live demo</button><button data-t="plan">What to build</button></div>
+<div id="demo"></div><div id="plan" hidden></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const techs=[{n:"Ravi",sk:"Electrical",on:true,load:2},{n:"Meena",sk:"Electrical",on:true,load:4},{n:"Sam",sk:"Electrical",on:false,load:0},{n:"Arjun",sk:"Network",on:true,load:1}];
+let S;
+function reset(){S={reports:[],inc:null,step:0,log:[],stock:0,approved:false,tech:null}}
+reset();
+const samples=["Lights are off in lab B-204, no electricity on 2nd floor of Block B","Power cut in Block B, projector and computers dead. Exam tomorrow!","Something is broken and not working","Wi-Fi is down in Library"];
+function extract(t){
+ const l=t.toLowerCase();
+ let type=/power|light|electric|breaker/.test(l)?"Electrical":/wi-?fi|internet|network/.test(l)?"Network":/\bac\b|cooling|air/.test(l)?"HVAC":null;
+ let b=(t.match(/block\s*([a-z])/i)||[])[1],r=(t.match(/\b([A-Z]-?\d{3})\b/i)||[])[1],lib=/library/i.test(t);
+ let loc=r?r.toUpperCase():b?"Block "+b.toUpperCase():lib?"Library":null;
+ let urg=/exam|urgent|dead|all|no electricity|down/.test(l)?"High":"Normal";
+ let asset=/projector/.test(l)?"Projector":/computer/.test(l)?"Computers":/breaker/.test(l)?"Breaker":"-";
+ return {type,loc,urg,asset,building:b?"Block "+b.toUpperCase():lib?"Library":null,text:t};
+}
+function submit(t){
+ const x=extract(t);const miss=[];if(!x.type)miss.push("what kind of issue is it (electrical, network, AC…)?");if(!x.loc)miss.push("which building or room?");
+ if(miss.length){S.log.push({k:"ask",h:`<b>Clarification needed.</b> Report “${t}” is missing details. Bot asks: ${miss.join(" and ")}`});render();return}
+ const dup=S.reports.find(p=>p.type===x.type&&p.building===x.building);
+ S.reports.push(x);
+ if(dup){S.log.push({k:"dup",h:`<b>Correlated.</b> “${t}” matches an open ${x.type} incident in ${x.building}. Linked instead of creating a duplicate ticket. (${S.reports.length} reports → 1 incident)`})}
+ else S.log.push({k:"new",h:`<b>Extracted:</b> <span class="tag">${x.type}</span><span class="tag">${x.loc}</span><span class="tag">Urgency: ${x.urg}</span><span class="tag">Asset: ${x.asset}</span>`});
+ if(!S.inc&&x.type){S.inc={type:x.type,building:x.building,sla:4}}
+ render();
+}
+function assign(){
+ const rows=techs.map(t=>{let why=t.sk!==S.inc.type?"Wrong skill":!t.on?"Off shift":"Eligible";return{...t,why}});
+ const el=rows.filter(r=>r.why==="Eligible").sort((a,b)=>a.load-b.load);S.tech=el[0];S.step=1;
+ S.log.push({k:"as",h:`<b>Assigned ${el[0].n}.</b> Rule: skill match → on shift → lowest workload.<div class="wrap"><table><tr><th>Tech</th><th>Skill</th><th>Load</th><th>Result</th></tr>${rows.map(r=>`<tr><td>${r.n}</td><td>${r.sk}</td><td>${r.load}</td><td class="${r.why==="Eligible"?"ok":"mu"}">${r.why}</td></tr>`).join("")}</table></div>`});render()}
+function room(){S.step=2;S.log.push({k:"rm",h:`<b class="wr">Booking conflict:</b> B-204 is booked for the <b>Data Structures exam tomorrow 10:00</b> (62 students) and the room has no power.<br>Alternatives (capacity ≥ 62, free at 10:00, has power): <span class="tag">A-110 (70)</span><span class="tag">C-301 (80)</span>. Suggested: A-110. Faculty and students notified once a manager confirms.`});render()}
+function parts(){S.step=3;S.log.push({k:"pt",h:`<b class="er">Part unavailable:</b> Main breaker 63A needs 1, stock = 0. Work order is flagged <span class="tag er">BLOCKED</span>. A purchase request of ₹4,800 is raised by Facilities Admin and routed for approval.`});render()}
+function approve(who){
+ if(who==="self"){S.log.push({k:"no",h:`<b class="er">403 Denied.</b> Separation of duties: the requester (Facilities Admin) cannot approve their own purchase.`});render();return}
+ S.step=4;S.stock=1;S.log.push({k:"ok",h:`<b class="ok">Approved by Procurement Approver.</b> Constraints revalidated (budget ok, vendor ok, part still out of stock) → order placed. Work order changes BLOCKED → READY. Audit entry written.`});render()}
+function fix(){S.step=5;S.log.push({k:"ok",h:`<b class="ok">Resolved.</b> ${S.tech.n} replaced the breaker, power restored, exam stays in B-204 if restored by 8:00 or moves to A-110. SLA met (3h 10m of 4h). Recurring-incident counter for Block B: 3 this month, so a maintenance review is suggested.`});render()}
+function render(){
+ const i=S.inc,st=S.step;
+ $("#demo").innerHTML=`<div class="g"><div>
+ <div class="c"><h3>1 · Report an issue</h3><textarea id="ta" rows="3" placeholder="Type a complaint like a student would…"></textarea>
+ <div class="row"><button class="b p" onclick="submit($('#ta').value.trim()||'')">Submit</button><button class="b" onclick="reset();render()">Reset</button></div>
+ <div class="mu">Try samples (click to send):</div><div class="row">${samples.map((s,k)=>`<button class="b" onclick="submit(samples[${k}])">${k===2?"Vague report":k===3?"Wi-Fi report":"Power report "+(k+1)}</button>`).join("")}</div></div>
+ <div class="c"><h3>2 · Incident workflow</h3>${i?`<div><span class="tag">INC-101</span><span class="tag">${i.type}</span><span class="tag">${i.building}</span><span class="tag">${S.reports.length} report(s)</span><span class="tag ${st>=3&&st<4?"er":""}">${st>=5?"RESOLVED":st>=3&&st<4?"BLOCKED":st>=1?"IN PROGRESS":"NEW"}</span><span class="tag">SLA ${i.sla}h</span></div>
+ <div class="row"><button class="b p" ${st!==0?"disabled":""} onclick="assign()">Auto-assign</button><button class="b p" ${st!==1?"disabled":""} onclick="room()">Check rooms</button><button class="b p" ${st!==2?"disabled":""} onclick="parts()">Reserve parts</button></div>
+ <div class="row"><button class="b" ${st!==3?"disabled":""} onclick="approve('self')">Approve as requester</button><button class="b p" ${st!==3?"disabled":""} onclick="approve('proc')">Approve as Procurement</button><button class="b p" ${st!==4?"disabled":""} onclick="fix()">Complete work</button></div>`:`<span class="mu">Submit at least two power reports to see correlation, then run the steps.</span>`}</div></div>
+ <div class="c"><h3>Activity &amp; audit trail</h3>${S.log.length?S.log.map(e=>`<div class="ev">${e.h}</div>`).join(""):'<span class="mu">Nothing yet.</span>'}</div></div>`;
+}
+$("#plan").innerHTML=`<div class="g"><div class="c"><h3>Core modules (build in this order)</h3><ol>
+<li><b>Intake + extraction:</b> form, chat box, fake email inbox. LLM returns JSON {type, location, urgency, asset, missing[]}.</li>
+<li><b>Correlation:</b> same type + building + time window → one incident (LLM or simple similarity, with a rules fallback).</li>
+<li><b>Assignment engine:</b> skill → shift → workload → priority; reassign if tech goes off shift.</li>
+<li><b>Room booking:</b> overlap check on (room, start, end); suggest rooms by capacity and features.</li>
+<li><b>Parts reservation:</b> reserve stock transactionally; zero stock → BLOCKED.</li>
+<li><b>Approvals:</b> requester ≠ approver, revalidate before execution.</li>
+<li><b>SLA + escalation:</b> timers per priority, escalate to manager at 75%.</li></ol></div>
+<div class="c"><h3>Judge-friendly extras</h3><ul><li>Wi-Fi outage: 20 reports collapse into 1 incident with a confidence score.</li><li>Heatmap of recurring incidents by building.</li><li>State machine: NEW → ASSIGNED → BLOCKED → IN PROGRESS → RESOLVED (illegal jumps rejected, repeated events ignored via idempotency key).</li><li>Role matrix enforced in the API (6 roles).</li></ul>
+<h3>Scenarios to demo</h3><ul><li>Classroom unavailable before an exam (this demo).</li><li>Critical part out of stock → purchase approval.</li></ul>
+<h3>Suggested stack</h3><p class="mu">FastAPI/Node + SQLite or Postgres, React, LLM API for extraction and summaries only.</p></div></div>`;
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));$("#demo").hidden=b.dataset.t!=="demo";$("#plan").hidden=b.dataset.t!=="plan"});
+render();
+</script></body></html>
